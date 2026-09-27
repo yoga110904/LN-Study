@@ -1,0 +1,170 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+
+    // Harus sama dengan ADMIN_EMAILS di js/firebase-config.js (huruf kecil)
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email.lower() in [
+          "yoga110011@gmail.com"
+        ];
+    }
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function email() { return request.auth.token.email.lower(); }
+    function domain() { return email().split('@')[1]; }
+
+    function inWhitelist() {
+      return (exists(/databases/$(database)/documents/allowedUsers/$(email()))
+          && get(/databases/$(database)/documents/allowedUsers/$(email())).data.allowed == true)
+        || (exists(/databases/$(database)/documents/allowedDomains/$(domain()))
+          && get(/databases/$(database)/documents/allowedDomains/$(domain())).data.allowed == true);
+    }
+
+    function isAllowed() { return signedIn() && (isAdmin() || inWhitelist()); }
+
+    // Pemilik data + masih punya akses (akses dicabut => data ikut terkunci)
+    function isOwner(uid) { return isAllowed() && request.auth.uid == uid; }
+
+    function str(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+
+    function validWhitelist() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['allowed', 'addedBy', 'addedAt'])
+        && d.allowed == true
+        && d.addedBy == request.auth.token.email
+        && d.addedAt == request.time;
+    }
+
+    function validProgress() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['read', 'days'])
+        && (!('read' in d) || (d.read is list && d.read.size() <= 5000))
+        && (!('days' in d) || (d.days is list && d.days.size() <= 1000));
+    }
+
+    function validAttempt() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['type', 'courseId', 'courseName', 'weekIds', 'total', 'correct', 'durationSec', 'wrong', 'createdAt'])
+        && d.type in ['exam', 'ln']
+        && str(d.courseId, 0, 100) && str(d.courseName, 0, 100)
+        && d.weekIds is list && d.weekIds.size() <= 200
+        && d.total is int && d.total >= 0 && d.total <= 1000
+        && d.correct is int && d.correct >= 0 && d.correct <= d.total
+        && d.durationSec is int && d.durationSec >= 0
+        && d.wrong is list && d.wrong.size() <= 300
+        && d.createdAt == request.time;
+    }
+
+    function validBookmark() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['courseId', 'weekId', 'termIndex', 'courseName', 'weekTitle', 'term', 'definition', 'createdAt'])
+        && str(d.courseId, 1, 100) && str(d.weekId, 1, 100) && d.termIndex is int
+        && str(d.courseName, 0, 100) && str(d.weekTitle, 0, 200)
+        && str(d.term, 1, 300) && str(d.definition, 0, 3000)
+        && d.createdAt == request.time;
+    }
+
+    function validNote() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['courseId', 'weekId', 'courseName', 'weekTitle', 'text', 'updatedAt'])
+        && str(d.courseId, 1, 100) && str(d.weekId, 1, 100)
+        && str(d.courseName, 0, 100) && str(d.weekTitle, 0, 200)
+        && str(d.text, 1, 20000)
+        && d.updatedAt == request.time;
+    }
+
+    function validCourse() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['name', 'status', 'createdAt'])
+        && str(d.name, 1, 100)
+        && d.status in ['in_progress', 'done'];
+    }
+
+    function validWeek() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['title', 'outline', 'summary', 'terms', 'quiz', 'createdAt'])
+        && d.keys().hasAll(['title', 'outline', 'summary', 'terms', 'quiz', 'createdAt'])
+        && str(d.title, 1, 200)
+        && str(d.summary, 0, 100000)
+        && d.outline is list && d.outline.size() <= 100
+        && d.terms is list && d.terms.size() <= 500
+        && d.quiz is list && d.quiz.size() <= 300
+        && d.createdAt == request.time;
+    }
+
+    function validImage() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['data', 'term', 'createdAt'])
+        && str(d.data, 30, 900000)
+        && str(d.term, 0, 200)
+        && d.createdAt == request.time;
+    }
+
+    // ---------- whitelist (admin only) ----------
+
+    match /allowedUsers/{id} {
+      allow read: if isAdmin() || (signedIn() && email() == id);
+      allow create, update: if isAdmin() && validWhitelist();
+      allow delete: if isAdmin();
+    }
+
+    match /allowedDomains/{id} {
+      allow read: if isAdmin() || (signedIn() && domain() == id);
+      allow create, update: if isAdmin() && validWhitelist();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- data pribadi tiap akun ----------
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validProgress();
+
+      match /attempts/{attemptId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validAttempt();
+        allow update: if false;
+      }
+
+      match /bookmarks/{bookmarkId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validBookmark();
+      }
+
+      match /notes/{noteId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validNote();
+      }
+
+      match /courses/{courseId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validCourse();
+
+        match /weeks/{weekId} {
+          allow read, delete: if isOwner(uid);
+          allow create: if isOwner(uid) && validWeek();
+          allow update: if false;
+
+          // gambar istilah (dikompres di browser, maks ~900 KB per dokumen)
+          match /images/{imgId} {
+            allow read, delete: if isOwner(uid);
+            allow create, update: if isOwner(uid) && validImage();
+          }
+        }
+      }
+    }
+
+    // Semua path lain (termasuk struktur lama /courses) ditolak.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
