@@ -1560,3 +1560,15 @@ html, body { overflow-x: clip; }
 @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 .fc-box { overflow: hidden; isolation: isolate; }
 .fc-box:hover i { animation-duration: 1.1s, 1.4s; }
+
+/* kartu "Lanjut baca" & "Flashcard" tidak boleh melebar melebihi layar HP kecil */
+.cont-row > *, .continue-card, .cc-text { min-width: 0; }
+.continue-card { max-width: 100%; }
+.cc-text strong { display: block; }
+@media (max-width: 420px) {
+  .continue-card { gap: 10px; padding: 14px; }
+  .cc-ico { width: 40px; height: 40px; font-size: 19px; border-radius: 12px; }
+  .cc-text strong { font-size: 15.5px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .cc-go { font-size: 0; padding: 0; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; }
+  .cc-go::after { content: "→"; font-size: 17px; }
+}
