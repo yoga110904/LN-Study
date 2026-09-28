@@ -9,6 +9,7 @@ import { confirmDialog, toast, confetti, progressBar } from "../ui.js";
 import { t, locale } from "../i18n.js";
 const tr = t;
 import { renderSummary, readingMinutes, bindTermPopover } from "../summary.js";
+import { renderMindmap, bindMindmap } from "../mindmap.js";
 
 const fmtDate = (ts) =>
   ts?.toDate ? ts.toDate().toLocaleDateString(locale(), { day: "numeric", month: "short", year: "numeric" }) : "";
@@ -107,6 +108,7 @@ export async function renderWeekDetail(view, courseId, weekId, isCurrent) {
     <div class="tabs" role="tablist">
       <button data-tab="summary" class="active">${t("week.tabSummary")}</button>
       <button data-tab="terms">${t("week.tabTerms")} (${terms.length})</button>
+      <button data-tab="mindmap">🧠 ${tr("week.tabMindmap")}</button>
       <button data-tab="quiz">${t("week.tabQuiz")} (${quiz.length})</button>
       <button data-tab="notes">✍️ ${t("week.tabNotes")}</button>
     </div>
@@ -137,6 +139,8 @@ export async function renderWeekDetail(view, courseId, weekId, isCurrent) {
         </div>`).join("")}</dl>` : `<div class="empty">${t("week.noTerms")}</div>`}
     </section>
 
+    <section data-panel="mindmap" hidden>${renderMindmap(week.title, outline, week.summary, terms)}</section>
+
     <section data-panel="quiz" hidden></section>
 
     <section data-panel="notes" hidden>
@@ -149,6 +153,8 @@ export async function renderWeekDetail(view, courseId, weekId, isCurrent) {
   `;
 
   bindTermPopover(view.querySelector(".summary"), terms);
+  bindTermPopover(view.querySelector('[data-panel="mindmap"]'), terms);
+  bindMindmap(view.querySelector('[data-panel="mindmap"]'));
   view.querySelectorAll("[data-jump]").forEach((a) => {
     const target = view.querySelector(`#sum-${a.dataset.jump}`);
     if (!target) return a.replaceWith(...a.childNodes);

@@ -59,9 +59,19 @@ export async function renderProfile(view, isCurrent) {
         <div><h2>${t("profile.moreMenu")}</h2><small>${t("profile.moreMenuSub")}</small></div>
       </div>
       <div class="pf-rows">
+        <a class="pf-row" href="#/flashcards">
+          <span class="pf-row-ico"><svg viewBox="0 0 24 24"><path d="M8 4h11a1 1 0 0 1 1 1v12M5 7h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm4 6h3"/></svg></span>
+          <span class="pf-row-text"><strong>${t("nav.flashcards")}</strong><small>${t("menu.fcDesc")}</small></span>
+          <span class="pf-row-go">→</span>
+        </a>
         <a class="pf-row" href="#/stats">
           <span class="pf-row-ico"><svg viewBox="0 0 24 24"><path d="M4 20V10m6 10V4m6 16v-7m4 7H3"/></svg></span>
           <span class="pf-row-text"><strong>${t("nav.stats")}</strong><small>${t("menu.statsDesc")}</small></span>
+          <span class="pf-row-go">→</span>
+        </a>
+        <a class="pf-row" href="#/saved">
+          <span class="pf-row-ico"><svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg></span>
+          <span class="pf-row-text"><strong>${t("nav.saved")}</strong><small>${t("menu.savedDesc")}</small></span>
           <span class="pf-row-go">→</span>
         </a>
         <a class="pf-row" href="#/upload">

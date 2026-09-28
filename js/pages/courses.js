@@ -2,6 +2,7 @@ import { getCourses, setCourseStatus, getAllWeeks, getReadSet, readKey } from ".
 import { escapeHtml, rerender } from "../router.js";
 import { confirmDialog, toast, confetti, progressBar, newCourseDialog, pageHero, statTile, colorFor, initialOf } from "../ui.js";
 import { getUser } from "../auth.js";
+import { getSrs, cardId, todayKey } from "../firestore.js";
 import { t } from "../i18n.js";
 
 export const PASTELS = ["c-yellow", "c-green", "c-purple", "c-pink", "c-blue"];
@@ -46,6 +47,16 @@ function nextUnread(courses, weeks, readSet) {
   return null;
 }
 
+function fcHtml(n) {
+  if (!n) return "";
+  return `
+    <a class="continue-card fc-short anim-in" href="#/flashcards">
+      <span class="cc-ico">🃏</span>
+      <div class="cc-text"><small>${t("nav.flashcards")}</small><strong>${t("fc.dueToday", { n })}</strong></div>
+      <span class="cc-go">${t("fc.go")} →</span>
+    </a>`;
+}
+
 function continueHtml(next, anyWeeks) {
   if (!anyWeeks) return "";
   if (!next) return `
@@ -69,6 +80,15 @@ export async function renderCourses(view, isCurrent) {
   const [courses, weeks, readSet] = await Promise.all([getCourses(), getAllWeeks(), getReadSet()]);
   if (!isCurrent()) return;
 
+  const srs = await getSrs().catch(() => ({}));
+  const today = todayKey();
+  const activeIds = new Set(courses.filter((c) => statusOf(c) === "in_progress").map((c) => c.id));
+  let dueCards = 0;
+  weeks.filter((w) => activeIds.has(w.courseId)).forEach((w) => (w.terms || []).forEach((_, i) => {
+    const s = srs[cardId(w.courseId, w.id, i)];
+    if (!s || s.due <= today) dueCards++;
+  }));
+
   const stats = {};
   for (const w of weeks) {
     const st = (stats[w.courseId] ||= { read: 0, total: 0 });
@@ -83,7 +103,10 @@ export async function renderCourses(view, isCurrent) {
       sub: t("courses.sub"),
       action: `<button class="btn btn-primary" data-new-course>${t("course.new")}</button>`,
     })}
-    ${continueHtml(nextUnread(courses, weeks, readSet), weeks.length > 0)}
+    <div class="cont-row">
+      ${continueHtml(nextUnread(courses, weeks, readSet), weeks.length > 0)}
+      ${fcHtml(dueCards)}
+    </div>
     <div id="statsWrap">${courses.length ? statsHtml(courses, stats) : ""}</div>
     ${courses.length ? `
       <div class="board">

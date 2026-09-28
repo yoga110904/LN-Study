@@ -12,6 +12,7 @@ import { renderManage } from "./pages/manage.js";
 import { renderExam } from "./pages/exam.js";
 import { renderSaved } from "./pages/saved.js";
 import { renderStats } from "./pages/stats.js";
+import { renderFlashcards } from "./pages/flashcards.js";
 
 const view = document.getElementById("view");
 const chrome = ["sidebar", "bottomNav"].map((id) => document.getElementById(id));
@@ -28,6 +29,7 @@ const routes = [
   { re: /^\/exam$/, page: renderExam, nav: "exam" },
   { re: /^\/saved$/, page: renderSaved, nav: "saved" },
   { re: /^\/stats$/, page: renderStats, nav: "stats" },
+  { re: /^\/flashcards$/, page: renderFlashcards, nav: "flashcards" },
   { re: /^\/upload$/, page: renderUpload, nav: "upload" },
   { re: /^\/profile$/, page: renderProfile, nav: "profile" },
 ];

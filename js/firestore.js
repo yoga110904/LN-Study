@@ -414,3 +414,26 @@ async function forgetSaved(field, value) {
     console.error(e);
   }
 }
+
+// ---------- flashcard (Leitner / spaced repetition) ----------
+//   users/{uid}/srs/{course_week_term} { box: 1..5, due: "YYYY-MM-DD", updatedAt }
+export const SRS_INTERVALS = [0, 1, 3, 7, 14, 30]; // hari per box
+export const cardId = (courseId, weekId, termIndex) => `${courseId}_${weekId}_${termIndex}`;
+
+export async function getSrs() {
+  if (DEMO_MODE) return { ...demoStore.srs };
+  const snap = await getDocs(sub("srs"));
+  const out = {};
+  snap.docs.forEach((d) => (out[d.id] = d.data()));
+  return out;
+}
+
+// known=true → naik box, false → balik ke box 1 (muncul lagi besok)
+export async function reviewCard(id, prevBox, known) {
+  const box = known ? Math.min(5, (prevBox || 0) + 1) : 1;
+  const due = new Date(Date.now() + SRS_INTERVALS[known ? box : 1] * 86400000);
+  const rec = { box, due: todayKey(due) };
+  if (DEMO_MODE) { demoStore.srs[id] = rec; return rec; }
+  await setDoc(subDoc("srs", id), { ...rec, updatedAt: serverTimestamp() });
+  return rec;
+}

@@ -46,4 +46,4 @@ export const demoAllowed = {
 };
 
 // data demo untuk latihan ujian, bookmark, catatan, statistik
-export const demoStore = { attempts: [], bookmarks: [], notes: [], days: [] };
+export const demoStore = { attempts: [], bookmarks: [], notes: [], days: [], srs: {} };

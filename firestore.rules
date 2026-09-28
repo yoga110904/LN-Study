@@ -81,6 +81,14 @@ service cloud.firestore {
         && d.updatedAt == request.time;
     }
 
+    function validSrs() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['box', 'due', 'updatedAt'])
+        && d.box is int && d.box >= 1 && d.box <= 5
+        && str(d.due, 10, 10)
+        && d.updatedAt == request.time;
+    }
+
     function validCourse() {
       let d = request.resource.data;
       return d.keys().hasOnly(['name', 'status', 'createdAt'])
@@ -137,6 +145,11 @@ service cloud.firestore {
       match /bookmarks/{bookmarkId} {
         allow read, delete: if isOwner(uid);
         allow create, update: if isOwner(uid) && validBookmark();
+      }
+
+      match /srs/{cardId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validSrs();
       }
 
       match /notes/{noteId} {
