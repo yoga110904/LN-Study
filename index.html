@@ -6,9 +6,10 @@
   <title>LN-STUDY</title>
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' https://www.gstatic.com https://apis.google.com;
+    script-src 'self' https://www.gstatic.com https://apis.google.com https://cdnjs.cloudflare.com;
+    worker-src 'self' blob:;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-    font-src https://fonts.gstatic.com;
+    font-src https://fonts.gstatic.com data:;
     img-src 'self' data: https:;
     connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://www.gstatic.com;
     frame-src https://*.firebaseapp.com https://accounts.google.com https://apis.google.com;

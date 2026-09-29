@@ -3,6 +3,7 @@ import { escapeHtml, navigate } from "../router.js";
 import { t } from "../i18n.js";
 import { newCourseDialog, toast } from "../ui.js";
 import { EXTRACT_PROMPT } from "../prompt-template.js";
+import { openPdf, cropDialog, pageFromNote } from "../pdf-crop.js";
 
 const MAX_JSON = 500_000; // Firestore max 1 MiB per dokumen
 const MAX_IMG_BYTES = 700_000; // target ukuran data URL setelah kompres
@@ -24,6 +25,31 @@ function validate(data) {
     q?.question && Array.isArray(q.options) && q.options.length > 1 && q.answer !== undefined)))
     errs.push(t("upload.errQuiz"));
   return errs;
+}
+
+// Ambil satu/lebih objek JSON dari teks hasil AI: buang ```json fence & teks tambahan.
+// Mendukung: 1 objek, array objek, atau beberapa objek berurutan.
+export function extractJsons(text) {
+  const raw = String(text).replace(/```(?:json)?/gi, "").trim();
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v : [v];
+  } catch (firstErr) {
+    const out = [];
+    let depth = 0, start = -1, inStr = false, esc = false;
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+      if (c === '"') inStr = true;
+      else if (c === "{") { if (depth++ === 0) start = i; }
+      else if (c === "}" && depth > 0 && --depth === 0) {
+        try { out.push(JSON.parse(raw.slice(start, i + 1))); } catch {}
+      }
+    }
+    if (!out.length) throw firstErr;
+    return out;
+  }
 }
 
 const safeUrl = (u) => (typeof u === "string" && /^https:\/\/\S+$/i.test(u.trim()) ? u.trim() : "");
@@ -114,7 +140,12 @@ export async function renderUpload(view, isCurrent) {
         <li class="step anim-in" data-step="3" style="--i:3">
           <span class="step-dot"><b>3</b><i>✓</i></span>
           <div class="step-body">
-            <div class="step-title"><strong>${t("upload.step3")}</strong><small>${t("upload.hint")}</small></div>
+            <div class="step-title"><strong>${t("upload.step3")}</strong><small>⚡ ${t("upload.autoHint")}</small></div>
+            <button type="button" class="paste-hero" id="pasteHero">
+              <span class="ph-ico">📋</span>
+              <span class="ph-text"><strong>${t("upload.pasteHero")}</strong><small>${t("upload.pasteHeroSub")}</small></span>
+              <span class="ph-kbd hide-mobile">⌘/Ctrl + V</span>
+            </button>
             <div class="editor" id="editor">
               <div class="editor-head">
                 <span class="editor-dots"><i></i><i></i><i></i></span>
@@ -199,9 +230,15 @@ export async function renderUpload(view, isCurrent) {
   const showMsg = (cls, html) => (msg.innerHTML = html ? `<div class="${cls}" style="margin-top:16px">${html}</div>` : "");
 
   const parse = () => {
-    try { return JSON.parse(ta.value); }
-    catch (e) { showMsg("error", `${t("upload.invalidJson")}: ${escapeHtml(e.message)}`); return null; }
+    try {
+      const list = extractJsons(ta.value);
+      if (!list.length) throw new Error(t("upload.emptyJson"));
+      return list;
+    } catch (e) { showMsg("error", `${t("upload.invalidJson")}: ${escapeHtml(e.message)}`); return null; }
   };
+  const courseByName = (name) => courses.find((c) => c.name.trim().toLowerCase() === String(name || "").trim().toLowerCase());
+  let pdfDoc = null;
+  let userPickedCourse = false;
 
   const resetAnalysis = () => {
     if (!analyzed) return;
@@ -224,9 +261,10 @@ export async function renderUpload(view, isCurrent) {
   function syncSteps() {
     const raw = ta.value.trim();
     let valid = false;
-    if (raw) { try { JSON.parse(raw); valid = true; } catch {} }
+    let count = 0;
+    if (raw) { try { count = extractJsons(raw).length; valid = count > 0; } catch {} }
     edStatus.className = `editor-status ${!raw ? "" : valid ? "ok" : "bad"}`;
-    edStatus.textContent = !raw ? t("editor.empty") : valid ? t("editor.valid") : t("editor.invalid");
+    edStatus.textContent = !raw ? t("editor.empty") : valid ? (count > 1 ? t("editor.validMany", { n: count }) : t("editor.valid")) : t("editor.invalid");
     edCount.textContent = raw ? t("editor.chars", { n: raw.length.toLocaleString() }) + ` · ${raw.split("\n").length} ${t("editor.lines")}` : "";
     editor.classList.toggle("is-valid", valid);
     editor.classList.toggle("is-invalid", !!raw && !valid);
@@ -239,7 +277,13 @@ export async function renderUpload(view, isCurrent) {
   }
   let syncTimer;
   ta.addEventListener("input", () => { clearTimeout(syncTimer); syncTimer = setTimeout(syncSteps, 250); });
-  sel.addEventListener("change", syncSteps);
+  sel.addEventListener("change", () => { if (analyzed) userPickedCourse = true; syncSteps(); });
+
+  // ⚡ analisis otomatis setiap kali JSON di-paste
+  const autoAnalyze = () => setTimeout(() => {
+    try { if (extractJsons(ta.value).length) analyzeBtn.click(); } catch {}
+  }, 0);
+  ta.addEventListener("paste", autoAnalyze);
   copyBtn.addEventListener("click", () => { promptCopied = true; syncSteps(); });
 
   view.querySelector("#pasteBtn").onclick = async () => {
@@ -250,11 +294,14 @@ export async function renderUpload(view, isCurrent) {
       ta.dispatchEvent(new Event("input"));
       syncSteps();
       editor.animate([{ transform: "scale(.99)" }, { transform: "none" }], { duration: 250 });
+      autoAnalyze();
     } catch {
       toast(t("editor.pasteFail"), "err");
       ta.focus();
     }
   };
+  view.querySelector("#pasteHero").onclick = () => view.querySelector("#pasteBtn").click();
+
   view.querySelector("#clearBtn").onclick = () => {
     ta.value = "";
     ta.dispatchEvent(new Event("input"));
@@ -265,7 +312,7 @@ export async function renderUpload(view, isCurrent) {
 
   view.querySelector("#fmtBtn").onclick = () => {
     const d = parse();
-    if (d) { ta.value = JSON.stringify(d, null, 2); showMsg(); syncSteps(); }
+    if (d) { ta.value = JSON.stringify(d.length === 1 ? d[0] : d, null, 2); showMsg(); syncSteps(); }
   };
 
   analyzeBtn.onclick = async () => {
@@ -279,12 +326,25 @@ export async function renderUpload(view, isCurrent) {
     box.innerHTML = `<div class="an-loading"><span class="search-spin"></span>${t("upload.analyzing")}</div>`;
     await new Promise((r) => setTimeout(r, 450)); // biar animasinya terlihat
 
-    const data = parse();
+    const list = parse();
     analyzeBtn.disabled = false;
     analyzeBtn.classList.remove("loading");
-    if (!data) { box.innerHTML = ""; return; }
-    const errs = validate(data);
+    if (!list) { box.innerHTML = ""; return; }
+    const errs = list.flatMap((d, k) => validate(d).map((e) => (list.length > 1 ? `LN #${k + 1}: ${e}` : e)));
     if (errs.length) { box.innerHTML = ""; return showMsg("error", errs.map(escapeHtml).join("<br>")); }
+    userPickedCourse = false;
+
+    if (list.length > 1) {
+      analyzed = { batch: list, needImages: [] };
+      queueMicrotask(syncSteps);
+      renderBatch(list);
+      submitBtn.disabled = false;
+      submitBtn.textContent = t("upload.submitMany", { n: list.length });
+      submitHint.hidden = true;
+      return;
+    }
+    const data = list[0];
+    submitBtn.textContent = t("upload.submit");
 
     const terms = data.terms || [];
     const needImages = terms
@@ -293,7 +353,7 @@ export async function renderUpload(view, isCurrent) {
 
     // course dari JSON ("course": "...") → pilih otomatis kalau sudah ada
     const jsonCourse = typeof data.course === "string" ? data.course.trim() : "";
-    const match = jsonCourse && courses.find((c) => c.name.trim().toLowerCase() === jsonCourse.toLowerCase());
+    const match = jsonCourse && courseByName(jsonCourse);
     if (match) sel.value = match.id;
 
     analyzed = { data, needImages };
@@ -329,13 +389,20 @@ export async function renderUpload(view, isCurrent) {
           <div class="an-course ${match ? "ok" : "warn"}">
             ${match
               ? t("upload.anCourseMatch", { name: escapeHtml(jsonCourse) })
-              : `${t("upload.anCourseNew", { name: escapeHtml(jsonCourse) })}
+              : `${t("upload.anCourseNew", { name: escapeHtml(jsonCourse) })} <b>${t("upload.anAutoCreate")}</b>
                  <button type="button" class="btn btn-sm" id="createJsonCourse">${t("upload.anCreateCourse", { name: escapeHtml(jsonCourse) })}</button>`}
           </div>` : ""}
 
         ${needImages.length ? `
           <h3 class="an-title">🖼️ ${t("upload.anImgTitle")} <span class="count" id="imgCount">0/${needImages.length}</span></h3>
           <p class="hint" style="margin-top:0">${t("upload.anImgHint")}</p>
+          <div class="pdf-src ${pdfDoc ? "loaded" : ""}">
+            <span class="pdf-ico">📄</span>
+            <div class="pdf-src-text"><strong id="pdfName">${pdfDoc ? escapeHtml(pdfDoc._lnName || "PDF") : t("pdf.pick")}</strong><small>${t("pdf.pickHint")}</small></div>
+            <label class="btn btn-sm btn-accent">
+              <input type="file" accept="application/pdf" id="pdfInput" hidden />${pdfDoc ? t("pdf.change") : t("pdf.choose")}
+            </label>
+          </div>
           <div class="img-grid">
             ${needImages.map((i, n) => `
               <div class="img-slot anim-in" style="--i:${n}" data-i="${i}">
@@ -343,6 +410,7 @@ export async function renderUpload(view, isCurrent) {
                   <strong>${escapeHtml(terms[i].term)}</strong>
                   <p>${escapeHtml(terms[i].image_note)}</p>
                 </div>
+                <button type="button" class="btn btn-sm pdf-crop-btn" data-act="pdf">✂️ ${t("pdf.cropFrom", { n: pageFromNote(terms[i].image_note) })}</button>
                 <label class="drop">
                   <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
                   <span class="drop-empty">
@@ -378,6 +446,98 @@ export async function renderUpload(view, isCurrent) {
     });
 
     box.querySelectorAll(".img-slot").forEach(setupSlot);
+    box.querySelector(".analysis")?.classList.toggle("has-pdf", !!pdfDoc);
+
+    box.querySelector("#pdfInput")?.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const row = box.querySelector(".pdf-src");
+      row.classList.add("busy");
+      box.querySelector("#pdfName").textContent = t("pdf.loading");
+      try {
+        pdfDoc = await openPdf(file);
+        pdfDoc._lnName = file.name;
+        row.classList.add("loaded");
+        box.querySelector("#pdfName").textContent = `${file.name} · ${t("pdf.pages", { n: pdfDoc.numPages })}`;
+        box.querySelector(".analysis").classList.add("has-pdf");
+        toast(t("pdf.ready"));
+      } catch (err) {
+        box.querySelector("#pdfName").textContent = t("pdf.pick");
+        toast(err.message, "err");
+      }
+      row.classList.remove("busy");
+    });
+  }
+
+  // ---------- mode banyak LN ----------
+  function renderBatch(list) {
+    const withImg = list.some((d) => (d.terms || []).some((x) => typeof x.image_note === "string" && x.image_note.trim()));
+    box.innerHTML = `
+      <div class="analysis anim-in">
+        <div class="an-head">
+          <span class="an-ok">✓</span>
+          <div><strong>${t("upload.batchTitle", { n: list.length })}</strong><small>${t("upload.batchSub")}</small></div>
+        </div>
+        <div class="batch-list">
+          ${list.map((d, k) => {
+            const cname = typeof d.course === "string" ? d.course.trim() : "";
+            const m = cname && courseByName(cname);
+            const tag = !cname ? `<span class="batch-tag sel">${t("upload.batchUseSel")}</span>`
+              : m ? `<span class="batch-tag ok">✓ ${t("upload.batchExists")}</span>`
+              : `<span class="batch-tag new">＋ ${t("upload.batchNew")}</span>`;
+            return `
+              <div class="batch-row anim-in" style="--i:${k}" data-k="${k}">
+                <span class="ex-num">${k + 1}</span>
+                <div class="batch-main">
+                  <strong>${escapeHtml(d.title)}</strong>
+                  <small>📘 ${escapeHtml(cname || sel.selectedOptions[0]?.text || "—")} · ${(d.terms || []).length} ${t("week.tabTerms").toLowerCase()} · ${(d.quiz || []).length} quiz</small>
+                </div>
+                ${tag}
+                <span class="batch-state"></span>
+              </div>`;
+          }).join("")}
+        </div>
+        ${withImg ? `<p class="hint">🖼️ ${t("upload.batchNoImg")}</p>` : ""}
+      </div>`;
+  }
+
+  async function submitBatch(list) {
+    submitBtn.disabled = true;
+    analyzeBtn.disabled = true;
+    let done = 0;
+    try {
+      for (let k = 0; k < list.length; k++) {
+        const d = list[k];
+        const row = box.querySelector(`.batch-row[data-k="${k}"]`);
+        const state = row.querySelector(".batch-state");
+        state.innerHTML = `<span class="search-spin"></span>`;
+        submitBtn.textContent = t("upload.sendingMany", { i: k + 1, n: list.length });
+        const cname = typeof d.course === "string" ? d.course.trim() : "";
+        let courseId = cname ? courseByName(cname)?.id : sel.value;
+        if (cname && !courseId) {
+          courseId = await createCourse(cname);
+          addCourseOption({ id: courseId, name: cname });
+        }
+        if (!courseId) throw new Error(t("upload.needCourse"));
+        await addWeek(courseId, {
+          title: d.title.trim(),
+          outline: d.outline || [],
+          summary: d.summary,
+          terms: (d.terms || []).map((x) => cleanTerm(x, false)),
+          quiz: d.quiz || [],
+        });
+        state.textContent = "✓";
+        row.classList.add("ok");
+        done++;
+      }
+      showMsg("success", t("upload.batchDone", { n: done }));
+      setTimeout(() => navigate("/courses"), 900);
+    } catch (err) {
+      showMsg("error", `${t("upload.fail")} (${done}/${list.length}): ${escapeHtml(err.message)}`);
+      submitBtn.disabled = false;
+      analyzeBtn.disabled = false;
+      submitBtn.textContent = t("upload.submitMany", { n: list.length });
+    }
   }
 
   const updateImgCount = () => {
@@ -425,13 +585,33 @@ export async function renderUpload(view, isCurrent) {
     ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
     ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
     drop.addEventListener("drop", (e) => handle(e.dataTransfer.files[0]));
+    slot.querySelector('[data-act="pdf"]').onclick = async () => {
+      if (!pdfDoc) return toast(t("pdf.needPdf"), "info");
+      const term = analyzed.data.terms[idx];
+      const blob = await cropDialog(pdfDoc, pageFromNote(term.image_note), term.term);
+      if (blob) handle(new File([blob], "crop.png", { type: "image/png" }));
+    };
     slot.querySelector('[data-act="change"]').onclick = () => input.click();
     slot.querySelector('[data-act="remove"]').onclick = () => { delete images[idx]; show(); };
   }
 
   // paste gambar (Ctrl/Cmd+V) → masuk ke slot kosong pertama
   view.addEventListener("paste", (e) => {
-    if (!analyzed?.needImages.length || e.target === ta) return;
+    if (e.target === ta || e.target.closest("input, textarea")) return;
+    const text = e.clipboardData?.getData("text") || "";
+    if (text.includes("{") && !e.clipboardData?.files?.length) {
+      try {
+        if (extractJsons(text).length) {
+          e.preventDefault();
+          ta.value = text;
+          ta.dispatchEvent(new Event("input"));
+          syncSteps();
+          ta.scrollIntoView({ behavior: "smooth", block: "center" });
+          return autoAnalyze();
+        }
+      } catch {}
+    }
+    if (!analyzed?.needImages.length) return;
     const file = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith("image/"));
     if (!file) return;
     const slot = [...box.querySelectorAll(".img-slot")].find((s) => !images[s.dataset.i]);
@@ -447,9 +627,20 @@ export async function renderUpload(view, isCurrent) {
   view.querySelector("#upForm").onsubmit = async (e) => {
     e.preventDefault();
     if (!analyzed) return showMsg("error", t("upload.analyzeFirst"));
-    const courseId = sel.value;
-    if (!courseId) return showMsg("error", t("upload.needCourse"));
+    if (analyzed.batch) return submitBatch(analyzed.batch);
     const { data } = analyzed;
+    let courseId = sel.value;
+    const jsonCourse = typeof data.course === "string" ? data.course.trim() : "";
+    if (jsonCourse && !courseByName(jsonCourse) && (!userPickedCourse || !courseId)) {
+      try {
+        courseId = await createCourse(jsonCourse);
+        addCourseOption({ id: courseId, name: jsonCourse });
+        toast(t("course.created", { name: jsonCourse }));
+      } catch (err) {
+        return showMsg("error", `${t("course.createFail")}: ${escapeHtml(err.message)}`);
+      }
+    }
+    if (!courseId) return showMsg("error", t("upload.needCourse"));
 
     submitBtn.disabled = true;
     analyzeBtn.disabled = true;
