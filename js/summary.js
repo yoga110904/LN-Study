@@ -57,11 +57,11 @@ export function renderSummary(summary, terms = []) {
   };
 
   const body = (content) => {
-    const firstItem = content.search(/\(\s*[a-z]\s*\)\s/);
+    const firstItem = content.search(/\(\s*[a-zA-Z]\s*\)\s/);
     if (firstItem < 0) return paragraphs(content).map((p) => `<p>${rich(p)}</p>`).join("");
 
     const intro = content.slice(0, firstItem).replace(/[;,\s]+$/, "");
-    const parts = content.slice(firstItem).split(/\(\s*[a-z]\s*\)\s*/).filter((x) => x.trim());
+    const parts = content.slice(firstItem).split(/\(\s*[a-zA-Z]\s*\)\s*/).filter((x) => x.trim());
     let outro = "";
     const last = parts.length - 1;
     const cut = parts[last].search(/\.\s+(?=\p{Lu})/u);
@@ -83,18 +83,42 @@ export function renderSummary(summary, terms = []) {
     ].join("");
   };
 
-  const blocks = text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  // Kelompokkan jadi section. Heading bisa berupa:
+  //  "1. JUDUL: isi..."        (judul + isi di baris yang sama)
+  //  "1. JUDUL." / "1. Judul"   (judul di baris sendiri, isi di baris berikutnya)
+  const sections = [];
+  let cur = { num: null, title: null, lines: [] };
+  const push = () => { if (cur.title || cur.lines.join("").trim()) sections.push(cur); };
+  for (const line of text.split("\n")) {
+    const inline = line.match(SECTION_RE);
+    const alone = line.match(/^\s*(\d{1,2})[.)]\s*([^\n]{2,90}?)\s*[.:]?\s*$/);
+    const isAloneHeading = alone && line.trim().length <= 100 &&
+      (alone[2] === alone[2].toUpperCase() || /:\s*$/.test(line) || !/[.,;]\s/.test(alone[2]));
+    if (inline && !/\.\s/.test(inline[2]) && inline[3].trim()) {
+      push();
+      cur = { num: inline[1], title: inline[2].trim(), lines: [inline[3]] };
+    } else if (isAloneHeading) {
+      push();
+      cur = { num: alone[1], title: alone[2].trim(), lines: [] };
+    } else {
+      cur.lines.push(line);
+    }
+  }
+  push();
+
+  const renderBody = (lines) => lines.join("\n").split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean)
+    .map((b) => body(b.replace(/\s*\n\s*/g, " "))).join("");
+
   let n = 0;
-  return blocks
-    .map((b) => {
+  return sections
+    .map((sec) => {
       seen.clear();
-      const m = b.match(SECTION_RE);
-      if (!m) return `<div class="sum-plain">${body(b)}</div>`;
+      if (!sec.title) return `<div class="sum-intro anim-in"><span class="sum-intro-ico">🎯</span><div>${renderBody(sec.lines)}</div></div>`;
       n++;
       return `
         <section class="sum-sec anim-in" id="sum-${n}" style="--i:${n}">
-          <header><span class="sum-num">${escapeHtml(m[1])}</span><h3>${escapeHtml(titleCase(m[2].trim()))}</h3></header>
-          <div class="sum-body">${body(m[3])}</div>
+          <header><span class="sum-num">${escapeHtml(sec.num)}</span><h3>${escapeHtml(titleCase(sec.title.replace(/[.:]$/, "")))}</h3></header>
+          <div class="sum-body">${renderBody(sec.lines)}</div>
         </section>`;
     })
     .join("");

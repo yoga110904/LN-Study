@@ -1645,3 +1645,7 @@ html, body { overflow-x: clip; }
 .crop-loading .search-spin { position: static; opacity: 1; transform: none; width: 30px; height: 30px; animation: spin .7s linear infinite; }
 .crop-btns { display: flex; gap: 8px; }
 @media (max-width: 599px) { .crop-btns { width: 100%; } .crop-btns .btn { flex: 1; } }
+/* intro/LO sebelum section pertama */
+.sum-intro { display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; margin-bottom: 16px; border-radius: 18px; background: linear-gradient(120deg, #6c6cf526, #6c6cf508 70%), var(--panel); border: 1px solid #6c6cf544; }
+.sum-intro-ico { font-size: 20px; line-height: 1.6; }
+.sum-intro p { margin: 0 0 8px; }

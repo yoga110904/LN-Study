@@ -5,10 +5,14 @@ const PASTEL = ["c-yellow", "c-green", "c-purple", "c-pink", "c-blue"];
 
 // Kelompokkan istilah ke cabang outline berdasarkan section summary tempat istilah itu muncul
 function buildTree(outline, summary, terms) {
-  const blocks = String(summary || "").split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  // potong summary per baris yang diawali "1." / "2." ... (heading section)
+  const text = String(summary || "");
+  const starts = [...text.matchAll(/^\s*(\d{1,2})[.)]\s/gm)].map((m) => ({ n: Number(m[1]), at: m.index }));
   const sectionText = outline.map((_, i) => {
-    const byNum = blocks.find((b) => new RegExp(`^\\s*${i + 1}[.)]\\s`).test(b));
-    return (byNum || "").toLowerCase();
+    const k = starts.findIndex((x) => x.n === i + 1);
+    if (k < 0) return "";
+    const end = starts.slice(k + 1).find((x) => x.n === i + 2)?.at ?? text.length;
+    return text.slice(starts[k].at, end).toLowerCase();
   });
   // kalau summary tidak bernomor, cocokkan dengan judul outline saja
   const hasSections = sectionText.some(Boolean);
